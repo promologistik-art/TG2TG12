@@ -23,10 +23,39 @@ class PostScheduler:
         while self._running:
             try:
                 await self._check_and_publish()
+                await self._cleanup_stuck_posts()
                 await asyncio.sleep(30)
             except Exception as e:
                 logger.error(f"PostScheduler error: {e}")
                 await asyncio.sleep(60)
+
+    async def _cleanup_stuck_posts(self):
+        """Помечает как failed посты, висящие в очереди больше 24 часов."""
+        try:
+            deadline = datetime.utcnow() - timedelta(hours=24)
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(PostQueue).where(
+                        PostQueue.status == "pending",
+                        PostQueue.scheduled_time < deadline
+                    )
+                )
+                stuck_posts = result.scalars().all()
+                
+                if stuck_posts:
+                    for post in stuck_posts:
+                        await session.execute(
+                            update(PostQueue)
+                            .where(PostQueue.id == post.id)
+                            .values(
+                                status="failed",
+                                error_message="Завис в очереди > 24 часов"
+                            )
+                        )
+                    await session.commit()
+                    logger.warning(f"🧹 Marked {len(stuck_posts)} stuck posts as failed")
+        except Exception as e:
+            logger.error(f"Cleanup stuck posts error: {e}")
 
     async def _check_and_publish(self):
         """Публикует ОДИН пост за раз с проверкой интервала и активных часов."""
@@ -49,7 +78,14 @@ class PostScheduler:
             project = result.scalar_one_or_none()
             
             if not project:
-                logger.warning(f"Project {queue_item.project_id} not found, skipping post {queue_item.id}")
+                logger.warning(f"Project {queue_item.project_id} not found, marking post {queue_item.id} as failed")
+                async with AsyncSessionLocal() as s:
+                    await s.execute(
+                        update(PostQueue)
+                        .where(PostQueue.id == queue_item.id)
+                        .values(status="failed", error_message="Проект не найден")
+                    )
+                    await s.commit()
                 return
             
             # === ПРОВЕРКА АКТИВНЫХ ЧАСОВ ===
@@ -61,10 +97,6 @@ class PostScheduler:
             
             if end_hour != 24:
                 if current_hour < start_hour or current_hour >= end_hour:
-                    logger.info(
-                        f"⏸️ Post {queue_item.id}: outside active hours "
-                        f"({start_hour}:00-{end_hour}:00), current time: {current_hour}:{msk_now.minute:02d} MSK"
-                    )
                     return
             
             # === ПРОВЕРКА ИНТЕРВАЛА ===
@@ -75,7 +107,6 @@ class PostScheduler:
             )
             last_published = result.scalar_one_or_none()
             
-            # post_interval_hours теперь хранит минуты
             interval_minutes = project.post_interval_hours
             
             if last_published and last_published.published_at:
@@ -83,7 +114,6 @@ class PostScheduler:
                 elapsed = (msk_now - last_msk).total_seconds() / 60
                 
                 if elapsed < interval_minutes:
-                    # Переносим пост вперёд
                     new_scheduled = last_published.published_at + timedelta(minutes=interval_minutes)
                     await session.execute(
                         update(PostQueue)
@@ -122,6 +152,17 @@ class PostScheduler:
                 logger.warning(f"❌ Failed to publish post {queue_item.id}")
         except Exception as e:
             logger.error(f"Error publishing post {queue_item.id}: {e}")
+            # На всякий случай помечаем как failed при любом исключении
+            try:
+                async with AsyncSessionLocal() as s:
+                    await s.execute(
+                        update(PostQueue)
+                        .where(PostQueue.id == queue_item.id)
+                        .values(status="failed", error_message=f"Критическая ошибка: {str(e)[:100]}")
+                    )
+                    await s.commit()
+            except:
+                pass
 
     async def stop(self):
         self._running = False
