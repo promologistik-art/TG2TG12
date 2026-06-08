@@ -19,7 +19,7 @@ class Scheduler:
         self.poster = poster
         self._running = False
         self._tasks = {}
-        self._last_daily_report = None
+        self._last_daily_cleanup = None
         self._last_check = {}
 
     async def start(self):
@@ -39,112 +39,11 @@ class Scheduler:
         now = get_moscow_time()
         if now.hour == 9 and now.minute == 0:
             today = now.date()
-            if self._last_daily_report != today:
-                self._last_daily_report = today
-                await self._send_daily_report()
+            if self._last_daily_cleanup != today:
+                self._last_daily_cleanup = today
                 from database import clear_parsed_cache
                 await clear_parsed_cache()
                 logger.info("🧹 Parsed URLs cache cleared (daily)")
-
-    async def _send_daily_report(self):
-        """Отправляет админу отчёт за вчерашний день."""
-        try:
-            now = datetime.utcnow()
-            yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            async with AsyncSessionLocal() as session:
-                # Все пользователи
-                result = await session.execute(select(User))
-                users = result.scalars().all()
-                users_count = len(users)
-                
-                # Активные проекты
-                result = await session.execute(select(Project).where(Project.is_active == True))
-                projects = result.scalars().all()
-                projects_count = len(projects)
-                
-                # Активные источники
-                result = await session.execute(
-                    select(SourceChannel).where(SourceChannel.is_active == True)
-                )
-                sources = result.scalars().all()
-                sources_count = len(sources)
-                
-                # Спарсено за вчера (по created_at очереди)
-                result = await session.execute(
-                    select(PostQueue).where(
-                        PostQueue.created_at >= yesterday,
-                        PostQueue.created_at < today_start
-                    )
-                )
-                total_parsed = len(result.scalars().all())
-                
-                # Опубликовано за вчера
-                result = await session.execute(
-                    select(PostQueue).where(
-                        PostQueue.status == "published",
-                        PostQueue.published_at >= yesterday,
-                        PostQueue.published_at < today_start
-                    )
-                )
-                published_posts = result.scalars().all()
-                total_posted = len(published_posts)
-                
-                # Топ-3 проекта за вчера
-                project_posted = {}
-                for p in published_posts:
-                    project_posted[p.project_id] = project_posted.get(p.project_id, 0) + 1
-                
-                top3_ids = sorted(project_posted, key=project_posted.get, reverse=True)[:3]
-                top3 = []
-                for pid in top3_ids:
-                    for p in projects:
-                        if p.id == pid:
-                            top3.append((p.name, project_posted[pid]))
-                            break
-                
-                # В очереди сейчас
-                result = await session.execute(
-                    select(PostQueue).where(PostQueue.status == "pending")
-                )
-                pending = len(result.scalars().all())
-                
-                # Ошибок за вчера
-                result = await session.execute(
-                    select(PostQueue).where(
-                        PostQueue.status == "failed",
-                        PostQueue.created_at >= yesterday,
-                        PostQueue.created_at < today_start
-                    )
-                )
-                failed = len(result.scalars().all())
-            
-            yesterday_str = yesterday.strftime('%d.%m.%Y')
-            
-            text = f"📊 <b>Отчёт за {yesterday_str}</b>\n\n"
-            text += f"👥 Пользователей: {users_count}\n"
-            text += f"📁 Проектов: {projects_count}\n"
-            text += f"📥 Источников: {sources_count}\n"
-            text += f"🔄 Спарсено: {total_parsed}\n"
-            text += f"📤 Опубликовано: {total_posted}\n"
-            text += f"📬 В очереди: {pending}\n"
-            text += f"❌ Ошибок публикации: {failed}\n"
-            
-            if top3:
-                text += f"\n🏆 <b>Топ-{len(top3)} активных проекта:</b>\n"
-                for name, count in top3:
-                    text += f"• «{name}» — {count} постов\n"
-            
-            from telegram import Bot
-            bot = Bot(token=Config.BOT_TOKEN)
-            await bot.send_message(
-                chat_id=Config.ADMIN_ID,
-                text=text,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error(f"Daily report failed: {e}")
 
     async def _check_projects(self):
         now = datetime.utcnow()
@@ -188,7 +87,6 @@ class Scheduler:
                     logger.info(f"⏰ Project '{project.name}' (ID: {project.id}) scheduled")
 
     async def _download_media_with_retry(self, scraper, media_url: str, save_path: str, max_retries: int = 3) -> bool:
-        """Скачивание медиа с повторными попытками."""
         for attempt in range(max_retries):
             if await scraper.download_media(media_url, save_path):
                 try:
@@ -215,7 +113,6 @@ class Scheduler:
         return False
 
     async def _get_last_scheduled_time(self, project_id: int) -> datetime:
-        """Возвращает время последнего запланированного поста в очереди (UTC)."""
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(PostQueue)
@@ -224,7 +121,6 @@ class Scheduler:
                 .limit(1)
             )
             last_queued = result.scalar_one_or_none()
-            
             if last_queued:
                 return last_queued.scheduled_time
             return None
@@ -344,10 +240,7 @@ class Scheduler:
                     if source.max_video_duration and source.max_video_duration > 0:
                         video_dur = best_post.get("video_duration", 0)
                         if video_dur > 0 and video_dur > source.max_video_duration:
-                            logger.info(
-                                f"⏰ Video too long from @{source.channel_username}: "
-                                f"{video_dur}s > {source.max_video_duration}s max"
-                            )
+                            logger.info(f"⏰ Video too long from @{source.channel_username}: {video_dur}s > {source.max_video_duration}s max")
                             continue
                     
                     media_type = best_post.get("media_type")
@@ -360,11 +253,7 @@ class Scheduler:
                         if not has_media or media_type != "video":
                             continue
                     
-                    logger.info(
-                        f"🏆 Selected from @{source.channel_username}: "
-                        f"score={best_score}, type={media_type}, "
-                        f"duration={best_post.get('video_duration', 0)}s"
-                    )
+                    logger.info(f"🏆 Selected from @{source.channel_username}: score={best_score}, type={media_type}, duration={best_post.get('video_duration', 0)}s")
                     
                     await mark_post_parsed(project.id, source.id, best_post["url"])
                     total_parsed += 1
@@ -384,9 +273,7 @@ class Scheduler:
                     
                     if source.media_filter in ("photo_only", "video_only"):
                         if not media_downloaded:
-                            logger.info(
-                                f"🚫 BLOCKED: media_filter={source.media_filter} but media download failed"
-                            )
+                            logger.info(f"🚫 BLOCKED: media_filter={source.media_filter} but media download failed")
                             continue
                     
                     if source.remove_original_text and not media_downloaded:
@@ -414,10 +301,7 @@ class Scheduler:
             logger.info(f"📤 Found {len(posts_to_publish)} posts to queue")
             
             msk_now = get_moscow_time().replace(tzinfo=None)
-            interval_minutes = max(
-                project.post_interval_hours,
-                user.min_post_interval_minutes
-            )
+            interval_minutes = max(project.post_interval_hours, user.min_post_interval_minutes)
             start_hour = project.active_hours_start
             end_hour = project.active_hours_end
             
@@ -437,12 +321,6 @@ class Scheduler:
                 
                 if next_time.hour >= end_hour:
                     next_time = next_time.replace(hour=start_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
-                
-                logger.info(
-                    f"📅 Continuing from last queued post: "
-                    f"{last_scheduled_msk.strftime('%d.%m.%Y %H:%M')} MSK → "
-                    f"next at {next_time.strftime('%d.%m.%Y %H:%M')} MSK"
-                )
             else:
                 minutes_since_start = (msk_now.hour - start_hour) * 60 + msk_now.minute
                 if minutes_since_start < 0:
@@ -453,8 +331,6 @@ class Scheduler:
                 
                 if next_time.hour >= end_hour:
                     next_time = next_time.replace(hour=start_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
-                
-                logger.info(f"📅 Starting fresh queue at {next_time.strftime('%d.%m.%Y %H:%M')} MSK")
             
             for i, post in enumerate(posts_to_publish):
                 if i > 0:
