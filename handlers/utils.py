@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime  # ← ПЕРЕНЕСЕНО В НАЧАЛО
+from datetime import datetime
 from telegram import Update, BotCommand
 from telegram.ext import ContextTypes
 from sqlalchemy import select, func
@@ -15,7 +15,8 @@ TARIFF_LIMITS = {
     "basic": {"max_projects": 1, "max_sources_per_project": 3, "min_post_interval": 120, "min_check_interval": 60, "name": "Базовый"},
     "standard": {"max_projects": 3, "max_sources_per_project": 5, "min_post_interval": 60, "min_check_interval": 30, "name": "Стандарт"},
     "pro": {"max_projects": 10, "max_sources_per_project": 10, "min_post_interval": 30, "min_check_interval": 15, "name": "PRO"},
-    "unlimited": {"max_projects": 999, "max_sources_per_project": 999, "min_post_interval": 1, "min_check_interval": 5, "name": "Безлимит"}
+    "unlimited": {"max_projects": 999, "max_sources_per_project": 999, "min_post_interval": 1, "min_check_interval": 5, "name": "Безлимит"},
+    "god": {"max_projects": 9999, "max_sources_per_project": 9999, "min_post_interval": 1, "min_check_interval": 1, "name": "God"}
 }
 
 def get_tariff_limits(tariff: str) -> dict:
