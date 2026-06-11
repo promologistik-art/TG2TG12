@@ -155,7 +155,7 @@ async def main():
     
     app.add_handler(CallbackQueryHandler(project_menu_callback, pattern="^project_menu_"))
     app.add_handler(CallbackQueryHandler(back_to_projects_callback, pattern="^back_to_projects$"))
-    app.add_handler(CallbackQueryHandler(projects_callback, pattern="^(create_project|select_project_|delete_project_|confirm_delete_|cancel_delete|stats_project_|project_sources_|project_change_target_)"))
+    app.add_handler(CallbackQueryHandler(projects_callback, pattern="^(create_project|select_project_|delete_project_|confirm_delete_|cancel_delete|stats_project_|project_sources_|project_change_target_|project_parse_|project_queue_)"))
     
     # ============ ConversationHandlers ============
     add_source_conv = ConversationHandler(

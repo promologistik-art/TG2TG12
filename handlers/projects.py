@@ -14,6 +14,21 @@ from .constants import CURRENT_PROJECT_KEY
 logger = logging.getLogger(__name__)
 
 
+async def _reset_all_dialogs(context: ContextTypes.DEFAULT_TYPE):
+    """Сбрасывает все флаги активных диалогов."""
+    keys_to_remove = [
+        'temp_project_id', 'temp_post_interval', 'temp_media_filter',
+        'temp_max_video_duration', 'temp_criteria', 'edit_source_id',
+        'awaiting_criteria', 'awaiting_duration', 'awaiting_text_choice',
+        'edit_views', 'edit_media_filter', 'temp_source', 'temp_project_name',
+        'temp_criteria_views', 'temp_source_id', 'delete_source_id',
+        'awaiting_broadcast', 'awaiting_project_name'
+    ]
+    for key in keys_to_remove:
+        context.user_data.pop(key, None)
+    logger.info("Dialogs reset before project creation")
+
+
 async def my_projects(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает список проектов с кнопками-названиями."""
     telegram_id = update.effective_user.id
@@ -111,7 +126,6 @@ async def project_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     target_name = target.channel_title if target else 'не задана'
     
-    # post_interval_hours теперь хранит минуты
     if project.post_interval_hours < 60:
         interval_display = f"каждые {project.post_interval_hours} мин"
     else:
@@ -133,9 +147,10 @@ async def project_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
         text += f"✍️ Подпись: {project.signature}\n"
     
     keyboard = [
-        [InlineKeyboardButton("📊 Статистика", callback_data=f"stats_project_{project.id}")],
         [InlineKeyboardButton("📥 Источники", callback_data=f"project_sources_{project.id}")],
         [InlineKeyboardButton("🎯 Сменить цель", callback_data=f"project_change_target_{project.id}")],
+        [InlineKeyboardButton("🔄 Парсинг сейчас", callback_data=f"project_parse_{project.id}")],
+        [InlineKeyboardButton("📬 Очередь", callback_data=f"project_queue_{project.id}")],
         [InlineKeyboardButton("⏰ Интервал парсинга", callback_data=f"project_set_check_{project.id}")],
         [InlineKeyboardButton("📅 Интервал постинга", callback_data=f"project_set_post_{project.id}")],
         [InlineKeyboardButton("✍️ Подпись", callback_data=f"project_set_signature_{project.id}")],
@@ -206,6 +221,19 @@ async def projects_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎯 Старая цель удалена.\n\nИспользуйте /add_target чтобы добавить новую цель."
         )
     
+    elif data.startswith("project_parse_"):
+        project_id = int(data.replace("project_parse_", ""))
+        context.user_data[CURRENT_PROJECT_KEY] = project_id
+        await query.edit_message_text("🔄 Запускаю парсинг...")
+        from .parsing import parse_now
+        await parse_now(update, context)
+    
+    elif data.startswith("project_queue_"):
+        project_id = int(data.replace("project_queue_", ""))
+        context.user_data[CURRENT_PROJECT_KEY] = project_id
+        from .parsing import queue_status
+        await queue_status(update, context)
+    
     elif data.startswith("project_set_check_"):
         project_id = int(data.replace("project_set_check_", ""))
         context.user_data['temp_project_id'] = project_id
@@ -255,21 +283,6 @@ async def projects_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("stats_project_"):
         project_id = int(data.replace("stats_project_", ""))
         await show_project_stats(query, project_id)
-
-
-async def _reset_all_dialogs(context: ContextTypes.DEFAULT_TYPE):
-    """Сбрасывает все флаги активных диалогов."""
-    keys_to_remove = [
-        'temp_project_id', 'temp_post_interval', 'temp_media_filter',
-        'temp_max_video_duration', 'temp_criteria', 'edit_source_id',
-        'awaiting_criteria', 'awaiting_duration', 'awaiting_text_choice',
-        'edit_views', 'edit_media_filter', 'temp_source', 'temp_project_name',
-        'temp_criteria_views', 'temp_source_id', 'delete_source_id',
-        'awaiting_broadcast', 'awaiting_project_name'
-    ]
-    for key in keys_to_remove:
-        context.user_data.pop(key, None)
-    logger.info("Dialogs reset before project creation")
 
 
 async def handle_project_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
