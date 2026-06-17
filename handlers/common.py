@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from sqlalchemy import select, func
 from config import Config
 from database import AsyncSessionLocal
-from models import User, Project
+from models import User, Project, UserBinding
 from .utils import is_admin, check_user_access, TARIFF_LIMITS
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
     
-    # Связь с KontentFabrik
+    # Проверка привязки к KontentFabrik
+    has_binding = False
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserBinding).where(
+                UserBinding.worker_user_id == user.id,
+                UserBinding.bot_type == Config.BOT_TYPE
+            )
+        )
+        has_binding = result.scalar_one_or_none() is not None
+    
+    if not has_binding and (not context.args or not context.args[0].startswith("kf_")):
+        await update.message.reply_text(
+            "⚠️ Сначала откройте <b>@KontentFabrik_bot</b>\n\n"
+            "1. Нажмите /start в @KontentFabrik_bot\n"
+            "2. Выберите парсер и нажмите «Открыть бота»\n\n"
+            "Это нужно один раз для привязки аккаунта.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Создаём привязку если зашёл через deep link
     if context.args and context.args[0].startswith("kf_"):
         head_user_id = int(context.args[0].split("_")[1])
         from worker_reg import save_user_binding
@@ -75,7 +96,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     welcome = f"👋 Привет, {user.first_name or 'пользователь'}!\n\n"
     welcome += (
-        "🤖 <b>TG2TG — парсинг и автопостинг</b>\n\n"
+        "🤖 <b>Telegram → Telegram — парсинг и автопостинг</b>\n\n"
         "Я нахожу лучшие посты в Telegram-каналах и публикую их в ваш канал.\n\n"
     )
     
@@ -104,7 +125,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     text = (
-        "📚 <b>TG2TG — Справка</b>\n\n"
+        "📚 <b>Telegram → Telegram — Справка</b>\n\n"
         "<b>📁 Проекты:</b>\n"
         "/my_projects — список ваших проектов\n\n"
         "<b>📥 Источники:</b>\n"
