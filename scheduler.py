@@ -301,6 +301,8 @@ class Scheduler:
             logger.info(f"📤 Found {len(posts_to_publish)} posts to queue")
             
             msk_now = get_moscow_time().replace(tzinfo=None)
+            # Лимит: не планировать дальше 24 часов
+            max_schedule_time = msk_now + timedelta(hours=24)
             interval_minutes = max(project.post_interval_hours, user.min_post_interval_minutes)
             start_hour = project.active_hours_start
             end_hour = project.active_hours_end
@@ -332,11 +334,17 @@ class Scheduler:
                 if next_time.hour >= end_hour:
                     next_time = next_time.replace(hour=start_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
             
+            skipped_count = 0
             for i, post in enumerate(posts_to_publish):
                 if i > 0:
                     next_time = next_time + timedelta(minutes=interval_minutes)
                     if next_time.hour >= end_hour:
                         next_time = next_time.replace(hour=start_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
+                
+                # Не планировать дальше 24 часов
+                if next_time > max_schedule_time:
+                    skipped_count += 1
+                    continue
                 
                 utc_time = next_time - timedelta(hours=3)
                 
@@ -348,6 +356,9 @@ class Scheduler:
                     platform=target.platform
                 )
                 logger.info(f"📅 Post {i+1} scheduled for {next_time.strftime('%d.%m.%Y %H:%M')} MSK")
+            
+            if skipped_count > 0:
+                logger.info(f"⏭️ Skipped {skipped_count} posts beyond 24h limit for project '{project.name}'")
             
             async with AsyncSessionLocal() as session:
                 result = await session.execute(select(Project).where(Project.id == project.id))
