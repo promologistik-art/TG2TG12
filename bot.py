@@ -60,6 +60,10 @@ from post_scheduler import PostScheduler
 from backup import BackupService, AutoBackup
 from cleanup import TempCleaner
 
+# === НАСТРОЙКА ЛОГИРОВАНИЯ ===
+# Убираем засоряющие логи от httpx (HTTP-запросы к Telegram API)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
