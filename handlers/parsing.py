@@ -119,9 +119,22 @@ async def queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_icon = {"pending": "⏳", "published": "✅", "failed": "❌"}.get(item.status, "❓")
         scheduled_msk = item.scheduled_time + MSK_OFFSET
         
+        # === ИСПРАВЛЕНИЕ: отображаем источник как "Название (@username)" ===
+        source_username = post_data.get('source_username', '')
+        source_title = post_data.get('source_title', '')
+        
+        if source_title and source_username:
+            source_display = f"{source_title} (@{source_username})"
+        elif source_title:
+            source_display = source_title
+        elif source_username:
+            source_display = f"@{source_username}"
+        else:
+            source_display = "?"
+        
         text += f"{status_icon} {scheduled_msk.strftime('%d.%m.%Y %H:%M')} МСК\n"
-        text += f"   📡 {post_data.get('source_name', '?')}\n"
-        text += f"   👁 {format_number(post_data.get('views', 0))} | ❤️ {format_number(post_data.get('likes', 0))}\n"
+        text += f"   📡 {source_display}\n"
+        text += f"   👁 {format_number(post_data.get('views', 0))} | ❤️ {format_number(post_data.get('reactions', 0))}\n"
         
         if item.status == "failed" and item.error_message:
             text += f"   ⚠️ {item.error_message[:100]}\n"
@@ -165,7 +178,7 @@ async def post_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text(
                 f"✅ Пост опубликован!\n\n"
                 f"📡 {post_data.get('source_name', '?')}\n"
-                f"👁 {format_number(post_data.get('views', 0))} | ❤️ {format_number(post_data.get('likes', 0))}"
+                f"👁 {format_number(post_data.get('views', 0))} | ❤️ {format_number(post_data.get('reactions', 0))}"
             )
         else:
             error_msg = queue_item.error_message or 'неизвестная ошибка'
